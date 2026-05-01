@@ -1,4 +1,4 @@
-﻿# IPA Injector Guide (SoopShield)
+# IPA Injector Guide (SoopShield)
 
 This repository includes `Inject SoopShield into IPA` GitHub Actions workflow.
 

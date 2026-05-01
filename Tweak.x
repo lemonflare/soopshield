@@ -1,4 +1,4 @@
-﻿#import <Foundation/Foundation.h>
+#import <Foundation/Foundation.h>
 #import <WebKit/WebKit.h>
 #import <objc/runtime.h>
 #import <substrate.h>

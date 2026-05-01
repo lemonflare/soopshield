@@ -1,4 +1,4 @@
-﻿name: Inject SoopShield into IPA
+name: Inject SoopShield into IPA
 
 on:
   workflow_dispatch:

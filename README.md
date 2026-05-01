@@ -1,4 +1,4 @@
-﻿# SoopShield iOS Tweak
+# SoopShield iOS Tweak
 
 SoopShield is an iOS tweak for SOOP that ports ad-blocking rules from the browser extension (`extension/AdBlock`) into native iOS hook points.
 

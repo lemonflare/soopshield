@@ -1,4 +1,4 @@
-﻿name: Build SoopShield iOS
+name: Build SoopShield iOS
 
 on:
   push:
