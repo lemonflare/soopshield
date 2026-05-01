@@ -1,0 +1,146 @@
+﻿name: Build SoopShield iOS
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "Tweak.x"
+      - "Makefile"
+      - "control"
+      - "SoopShield.plist"
+      - "build.sh"
+      - ".github/workflows/**"
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install make ldid dpkg
+
+      - name: Configure Theos path
+        run: |
+          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+          echo "THEOS=${{ github.workspace }}/theos" >> "$GITHUB_ENV"
+
+      - name: Cache Theos
+        id: theos
+        uses: actions/cache@v4
+        env:
+          cache-name: theos_cache_soop
+        with:
+          path: theos/
+          key: ${{ env.cache-name }}
+          restore-keys: ${{ env.cache-name }}
+
+      - name: Setup Theos
+        if: steps.theos.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: theos/theos
+          ref: master
+          path: theos
+          submodules: recursive
+
+      - name: Download iOS SDK
+        if: steps.theos.outputs.cache-hit != 'true'
+        run: |
+          git clone --quiet -n --depth=1 --filter=tree:0 https://github.com/theos/sdks/
+          cd sdks
+          git sparse-checkout set --no-cone iPhoneOS16.5.sdk
+          git checkout
+          mv *.sdk "$THEOS/sdks"
+          ls -la "$THEOS/sdks"
+
+      - name: Build package
+        run: |
+          make clean
+          make package DEBUG=0 FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+
+      - name: Find artifacts
+        id: find-files
+        run: |
+          DEB=$(find . -name "*.deb" -path "*/packages/*" | head -n 1)
+          echo "package=$DEB" >> "$GITHUB_OUTPUT"
+          echo "Found package: $DEB"
+
+          DYLIB=$(find .theos/obj -name "*.dylib" | head -n 1)
+          if [ -n "$DYLIB" ]; then
+            echo "dylib=$DYLIB" >> "$GITHUB_OUTPUT"
+            cp "$DYLIB" ./SoopShield.dylib
+            echo "dylib_simple=./SoopShield.dylib" >> "$GITHUB_OUTPUT"
+            file "$DYLIB"
+            lipo -info "$DYLIB" 2>/dev/null || echo "Single architecture"
+          else
+            echo "No dylib found"
+          fi
+
+      - name: Upload package and dylib
+        uses: actions/upload-artifact@v4
+        with:
+          name: SoopShield-build
+          path: |
+            ${{ steps.find-files.outputs.package }}
+            ${{ steps.find-files.outputs.dylib_simple }}
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Get package info
+        id: package-info
+        run: |
+          PACKAGE="${{ steps.find-files.outputs.package }}"
+          VERSION=$(dpkg-deb -I "$PACKAGE" | grep "Version:" | awk '{print $2}')
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Package version: $VERSION"
+
+      - name: Create Release
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.package-info.outputs.version }}-${{ github.run_number }}
+          name: SoopShield v${{ steps.package-info.outputs.version }}
+          files: |
+            ${{ steps.find-files.outputs.package }}
+            ${{ steps.find-files.outputs.dylib_simple }}
+          body: |
+            ## SoopShield iOS Tweak v${{ steps.package-info.outputs.version }}
+
+            ### Features
+            - URL-level ad request pre-blocking for SOOP ad endpoints
+            - WKWebView banner/chat ad UI hiding based on extension selectors
+            - Rootless Theos package build
+
+            ### Install
+            ```bash
+            dpkg -i SoopShield_*.deb
+            killall -9 SpringBoard
+            ```
+
+            ### Debug
+            ```bash
+            log stream --predicate 'eventMessage CONTAINS "SoopShield"' --level debug
+            ```
+
+            Notes:
+            - This tweak is unofficial and not affiliated with SOOP.
+            - URL patterns and selectors can change by app update.
+            - Users are responsible for compliance with terms and local law.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build summary
+        run: |
+          echo "### Build Successful" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Package: ${{ steps.find-files.outputs.package }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Dylib: ${{ steps.find-files.outputs.dylib_simple }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: ${{ steps.package-info.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"

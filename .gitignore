@@ -1,0 +1,41 @@
+# Theos
+.theos/
+obj/
+*.deb
+packages/
+
+# macOS
+.DS_Store
+._*
+
+# Linux
+*~
+.directory
+
+# Windows
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+.claude/
+*.swp
+*.swo
+
+# Build artifacts
+*.o
+*.dylib
+*.a
+
+# Temporary files
+tmp/
+temp/
+check_soop/
+test_extract/
+verify_ipa/
+dylib_output/
+
+# Injected IPAs (keep originals)
+*+SoopShield.ipa
+*+SOOP.ipa

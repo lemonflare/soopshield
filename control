@@ -1,0 +1,9 @@
+Package: com.lemonflare.soopshield
+Name: SoopShield
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: SOOP iOS ad request blocker + webview ad UI hider
+Maintainer: lemonflare
+Author: lemonflare
+Section: Tweaks
+Depends: mobilesubstrate (>= 0.9.5000), firmware (>= 11.0)

@@ -1,0 +1,67 @@
+ /* 애드벌룬 광고 */
+.adballoon_icon {
+  display: none !important;
+}
+
+ /* 숲토어 광고 */
+.shopProduct_banner {
+  display: none !important;
+}
+
+ /* 구독플러스 광고 */
+#timeshift.message_player.on {
+  display: none !important;
+}
+
+ /* 검색 왼쪽 광고 */
+.a_d_banner {
+  display: none !important;
+}
+
+ /* 메인 우측 하단 광고 배너 */
+.bnrimg_area {
+  display: none !important;
+}
+
+/* 메인 상단 콜라보 표시 */
+.collabo_brand {
+  display: none !important;
+}
+
+ /* 메인 좌측 캐치 하단 광고 배너 */
+.nav-conts #catch + li {
+  display: none !important;
+}
+
+ /* 방송국 우측 하단 광고 배너 */
+div[class*="NoticeLayer_layerContainer"] {
+  display: none !important;
+}
+
+ /* 메인 상단 영상 광고 */
+li[virtual-index="3"]:has(.player_thumb_wrap__xrIsm) {
+  display: none !important;
+}
+
+/* LIVE와 MY 상단 광고 배너 */
+.subBanner_fullBanner__SNZqb {
+  display: none !important;
+}
+
+/* '전체' 위 여백 제거 */
+#container._live > .title_wrap[data-testid="section-header"] {
+  padding-top: 10px;
+}
+
+/* e스포츠 광고 배너 */
+.main_banner_wrap {
+  display: none !important;
+}
+
+.contents_wrap.event {
+  display: none !important;
+}
+
+.gp_modal_wrap {
+  display: none !important;
+}
