@@ -210,10 +210,29 @@ typedef int (*SOOPGetAddrInfoFunction)(const char *, const char *, const struct 
 typedef struct hostent *(*SOOPGetHostByNameFunction)(const char *);
 typedef struct hostent *(*SOOPGetHostByName2Function)(const char *, int);
 
+static int soopshield_getaddrinfo(const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **res);
+static struct hostent *soopshield_gethostbyname(const char *name);
+static struct hostent *soopshield_gethostbyname2(const char *name, int af);
+
+static void *SOOPResolverSymbol(const char *name) {
+    static void *resolverHandle = NULL;
+    if (!resolverHandle) {
+        resolverHandle = dlopen("/usr/lib/system/libsystem_info.dylib", RTLD_LAZY);
+        if (!resolverHandle) {
+            resolverHandle = dlopen("/usr/lib/libSystem.B.dylib", RTLD_LAZY);
+        }
+    }
+
+    return resolverHandle ? dlsym(resolverHandle, name) : NULL;
+}
+
 static SOOPGetAddrInfoFunction SOOPOriginalGetAddrInfo(void) {
     static SOOPGetAddrInfoFunction function = NULL;
     if (!function) {
-        function = (SOOPGetAddrInfoFunction)dlsym(RTLD_NEXT, "getaddrinfo");
+        function = (SOOPGetAddrInfoFunction)SOOPResolverSymbol("getaddrinfo");
+        if ((void *)function == (void *)&soopshield_getaddrinfo) {
+            function = NULL;
+        }
     }
     return function;
 }
@@ -221,7 +240,10 @@ static SOOPGetAddrInfoFunction SOOPOriginalGetAddrInfo(void) {
 static SOOPGetHostByNameFunction SOOPOriginalGetHostByName(void) {
     static SOOPGetHostByNameFunction function = NULL;
     if (!function) {
-        function = (SOOPGetHostByNameFunction)dlsym(RTLD_NEXT, "gethostbyname");
+        function = (SOOPGetHostByNameFunction)SOOPResolverSymbol("gethostbyname");
+        if ((void *)function == (void *)&soopshield_gethostbyname) {
+            function = NULL;
+        }
     }
     return function;
 }
@@ -229,42 +251,75 @@ static SOOPGetHostByNameFunction SOOPOriginalGetHostByName(void) {
 static SOOPGetHostByName2Function SOOPOriginalGetHostByName2(void) {
     static SOOPGetHostByName2Function function = NULL;
     if (!function) {
-        function = (SOOPGetHostByName2Function)dlsym(RTLD_NEXT, "gethostbyname2");
+        function = (SOOPGetHostByName2Function)SOOPResolverSymbol("gethostbyname2");
+        if ((void *)function == (void *)&soopshield_gethostbyname2) {
+            function = NULL;
+        }
     }
     return function;
 }
 
 static int soopshield_getaddrinfo(const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **res) {
+    static __thread BOOL inHook = NO;
+    SOOPGetAddrInfoFunction original = SOOPOriginalGetAddrInfo();
+
+    if (inHook) {
+        return original ? original(node, service, hints, res) : EAI_FAIL;
+    }
+
+    inHook = YES;
     if (IsBlockedDNSHostCString(node)) {
         if (res) *res = NULL;
         NSLog(@"[SoopShield] Blocked DNS lookup: %s", node);
+        inHook = NO;
         return EAI_NONAME;
     }
 
-    SOOPGetAddrInfoFunction original = SOOPOriginalGetAddrInfo();
-    return original ? original(node, service, hints, res) : EAI_FAIL;
+    int result = original ? original(node, service, hints, res) : EAI_FAIL;
+    inHook = NO;
+    return result;
 }
 
 static struct hostent *soopshield_gethostbyname(const char *name) {
+    static __thread BOOL inHook = NO;
+    SOOPGetHostByNameFunction original = SOOPOriginalGetHostByName();
+
+    if (inHook) {
+        return original ? original(name) : NULL;
+    }
+
+    inHook = YES;
     if (IsBlockedDNSHostCString(name)) {
         h_errno = HOST_NOT_FOUND;
         NSLog(@"[SoopShield] Blocked DNS lookup: %s", name);
+        inHook = NO;
         return NULL;
     }
 
-    SOOPGetHostByNameFunction original = SOOPOriginalGetHostByName();
-    return original ? original(name) : NULL;
+    struct hostent *result = original ? original(name) : NULL;
+    inHook = NO;
+    return result;
 }
 
 static struct hostent *soopshield_gethostbyname2(const char *name, int af) {
+    static __thread BOOL inHook = NO;
+    SOOPGetHostByName2Function original = SOOPOriginalGetHostByName2();
+
+    if (inHook) {
+        return original ? original(name, af) : NULL;
+    }
+
+    inHook = YES;
     if (IsBlockedDNSHostCString(name)) {
         h_errno = HOST_NOT_FOUND;
         NSLog(@"[SoopShield] Blocked DNS lookup: %s", name);
+        inHook = NO;
         return NULL;
     }
 
-    SOOPGetHostByName2Function original = SOOPOriginalGetHostByName2();
-    return original ? original(name, af) : NULL;
+    struct hostent *result = original ? original(name, af) : NULL;
+    inHook = NO;
+    return result;
 }
 
 struct SOOPInterposePair {
