@@ -7,8 +7,8 @@ It blocks known ad request endpoints at URLSession level and applies best-effort
 ## Features
 
 - Native URL request pre-blocking for SOOP ad endpoints
-- In-process DNS lookup blocking for SOOP player ad hosts
-- WKWebView content-rule blocking for SOOP player ad hosts
+- In-process DNS lookup blocking for SOOP ad display hosts
+- WKWebView content-rule blocking for SOOP ad display hosts
 - WKWebView DOM-based ad/banner hiding and close-button auto click
 - Theos rootless package build (`.deb`)
 - GitHub Actions workflows for:

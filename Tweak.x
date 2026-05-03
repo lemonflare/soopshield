@@ -47,27 +47,9 @@ static BOOL HasSuffixOrExact(NSString *value, NSString *suffix) {
     return [value hasSuffix:[@"." stringByAppendingString:suffix]];
 }
 
-static BOOL IsSOOPLiveHost(NSString *host) {
-    if (host.length == 0) return NO;
-    return HasSuffixOrExact(host, @"sooplive.com") || HasSuffixOrExact(host, @"sooplive.co.kr");
-}
-
-static BOOL IsVodPlayerHost(NSString *host) {
-    if (host.length == 0) return NO;
-    if (!IsSOOPLiveHost(host)) return NO;
-
-    NSArray<NSString *> *parts = [host componentsSeparatedByString:@"."];
-    if (parts.count == 0) return NO;
-
-    NSString *first = parts.firstObject ?: @"";
-    return [first hasPrefix:@"vod-player"];
-}
-
-static BOOL IsBlockedSOOPPlayerHost(NSString *host) {
+static BOOL IsBlockedSOOPAdHost(NSString *host) {
     host = NormalizedHost(host);
     if (host.length == 0) return NO;
-
-    if (IsVodPlayerHost(host)) return YES;
 
     if (HostEquals(host, @"main-player.sooplive.com")) return YES;
     if (HostEquals(host, @"img-display.sooplive.com")) return YES;
@@ -83,7 +65,7 @@ static SOOPRequestPolicy RequestPolicyForURL(NSURL *url) {
     NSString *host = NormalizedHost(url.host);
     NSString *path = LowerString(url.path);
 
-    if (IsBlockedSOOPPlayerHost(host)) return SOOPRequestPolicyBlock;
+    if (IsBlockedSOOPAdHost(host)) return SOOPRequestPolicyBlock;
 
     if (HostEquals(host, @"ch.dawin.tv") && ([path isEqualToString:@"/dmpro"] || [path hasPrefix:@"/dmpro/"])) {
         return SOOPRequestPolicyBlock;
@@ -159,6 +141,25 @@ static NSString *const kSOOPDOMScript =
 "  const closeBtn = document.querySelector('.mainBanner_close__ftU15');"
 "  if (closeBtn) closeBtn.click();"
 "};"
+"const hideBlockedMediaSlots = () => {"
+"  const blocked = ['main-player.sooplive.', 'img-display.sooplive.'];"
+"  const mediaNodes = document.querySelectorAll('iframe, frame, embed, object, img, video, source, a');"
+"  for (const node of mediaNodes) {"
+"    const value = `${node.src || ''} ${node.href || ''} ${node.data || ''}`.toLowerCase();"
+"    if (!blocked.some(token => value.includes(token))) continue;"
+"    let target = node;"
+"    for (let i = 0; i < 4 && target.parentElement; i++) {"
+"      const rect = target.parentElement.getBoundingClientRect();"
+"      if (rect.width <= 900 && rect.height <= 400) target = target.parentElement;"
+"    }"
+"    target.style.setProperty('display', 'none', 'important');"
+"    target.style.setProperty('height', '0', 'important');"
+"    target.style.setProperty('min-height', '0', 'important');"
+"    target.style.setProperty('margin', '0', 'important');"
+"    target.style.setProperty('padding', '0', 'important');"
+"    target.setAttribute('aria-hidden', 'true');"
+"  }"
+"};"
 "const hideBySelectors = () => {"
 "  for (const selector of hideSelectors) {"
 "    try {"
@@ -180,6 +181,7 @@ static NSString *const kSOOPDOMScript =
 "const runAll = () => {"
 "  closeMainBanner();"
 "  hideChatBanner();"
+"  hideBlockedMediaSlots();"
 "  hideBySelectors();"
 "};"
 "runAll();"
@@ -193,17 +195,17 @@ static NSString *const kSOOPDOMScript =
 "setInterval(runAll, 600);"
 "})();";
 
-static NSString *const kSOOPContentRuleIdentifier = @"com.lemonflare.soopshield.webkit-rules";
+static NSString *const kSOOPContentRuleIdentifier = @"com.lemonflare.soopshield.webkit-rules.v2";
 static NSString *const kSOOPContentRuleList =
 @"["
-"{\"trigger\":{\"url-filter\":\"^https?://(vod-player[0-9]*|main-player|img-display)\\\\.sooplive\\\\.(com|co\\\\.kr)([:/]|$)\"},\"action\":{\"type\":\"block\"}}"
+"{\"trigger\":{\"url-filter\":\"^https?://(main-player|img-display)\\\\.sooplive\\\\.(com|co\\\\.kr)([:/]|$)\"},\"action\":{\"type\":\"block\"}}"
 "]";
 
 static BOOL IsBlockedDNSHostCString(const char *name) {
     if (!name || name[0] == '\0') return NO;
     NSString *host = [NSString stringWithUTF8String:name];
     if (!host) return NO;
-    return IsBlockedSOOPPlayerHost(host);
+    return IsBlockedSOOPAdHost(host);
 }
 
 typedef int (*SOOPGetAddrInfoFunction)(const char *, const char *, const struct addrinfo *, struct addrinfo **);
