@@ -40,3 +40,10 @@ dylib_output/
 # Injected IPAs (keep originals)
 *+SoopShield.ipa
 *+SOOP.ipa
+
+# Extension (local only, removed from repo)
+extension/
+
+# Log files
+*.log
+*.err
