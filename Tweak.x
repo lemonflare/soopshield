@@ -1,6 +1,9 @@
 #import <Foundation/Foundation.h>
 #import <WebKit/WebKit.h>
+#import <dlfcn.h>
+#import <netdb.h>
 #import <objc/runtime.h>
+#import <string.h>
 
 typedef NS_ENUM(NSUInteger, SOOPRequestPolicy) {
     SOOPRequestPolicyAllow = 0,
@@ -9,6 +12,7 @@ typedef NS_ENUM(NSUInteger, SOOPRequestPolicy) {
 
 static NSString *const kSOOPHandledKey = @"com.lemonflare.soopshield.handled";
 static const void *kSOOPScriptInstalledKey = &kSOOPScriptInstalledKey;
+static const void *kSOOPContentRuleInstalledKey = &kSOOPContentRuleInstalledKey;
 
 @interface SOOPAdBlockURLProtocol : NSURLProtocol
 @end
@@ -16,6 +20,14 @@ static const void *kSOOPScriptInstalledKey = &kSOOPScriptInstalledKey;
 static NSString *LowerString(NSString *value) {
     if (![value isKindOfClass:[NSString class]]) return @"";
     return value.lowercaseString;
+}
+
+static NSString *NormalizedHost(NSString *value) {
+    NSString *host = LowerString(value);
+    while (host.length > 0 && [host hasSuffix:@"."]) {
+        host = [host substringToIndex:host.length - 1];
+    }
+    return host;
 }
 
 static BOOL IsHTTPURL(NSURL *url) {
@@ -35,9 +47,14 @@ static BOOL HasSuffixOrExact(NSString *value, NSString *suffix) {
     return [value hasSuffix:[@"." stringByAppendingString:suffix]];
 }
 
+static BOOL IsSOOPLiveHost(NSString *host) {
+    if (host.length == 0) return NO;
+    return HasSuffixOrExact(host, @"sooplive.com") || HasSuffixOrExact(host, @"sooplive.co.kr");
+}
+
 static BOOL IsVodPlayerHost(NSString *host) {
     if (host.length == 0) return NO;
-    if (!HasSuffixOrExact(host, @"sooplive.com")) return NO;
+    if (!IsSOOPLiveHost(host)) return NO;
 
     NSArray<NSString *> *parts = [host componentsSeparatedByString:@"."];
     if (parts.count == 0) return NO;
@@ -46,16 +63,27 @@ static BOOL IsVodPlayerHost(NSString *host) {
     return [first hasPrefix:@"vod-player"];
 }
 
+static BOOL IsBlockedSOOPPlayerHost(NSString *host) {
+    host = NormalizedHost(host);
+    if (host.length == 0) return NO;
+
+    if (IsVodPlayerHost(host)) return YES;
+
+    if (HostEquals(host, @"main-player.sooplive.com")) return YES;
+    if (HostEquals(host, @"img-display.sooplive.com")) return YES;
+    if (HostEquals(host, @"main-player.sooplive.co.kr")) return YES;
+    if (HostEquals(host, @"img-display.sooplive.co.kr")) return YES;
+
+    return NO;
+}
+
 static SOOPRequestPolicy RequestPolicyForURL(NSURL *url) {
     if (!IsHTTPURL(url)) return SOOPRequestPolicyAllow;
 
-    NSString *host = LowerString(url.host);
+    NSString *host = NormalizedHost(url.host);
     NSString *path = LowerString(url.path);
 
-    if (IsVodPlayerHost(host)) return SOOPRequestPolicyBlock;
-
-    if (HostEquals(host, @"main-player.sooplive.com")) return SOOPRequestPolicyBlock;
-    if (HostEquals(host, @"img-display.sooplive.com")) return SOOPRequestPolicyBlock;
+    if (IsBlockedSOOPPlayerHost(host)) return SOOPRequestPolicyBlock;
 
     if (HostEquals(host, @"ch.dawin.tv") && ([path isEqualToString:@"/dmpro"] || [path hasPrefix:@"/dmpro/"])) {
         return SOOPRequestPolicyBlock;
@@ -165,6 +193,94 @@ static NSString *const kSOOPDOMScript =
 "setInterval(runAll, 600);"
 "})();";
 
+static NSString *const kSOOPContentRuleIdentifier = @"com.lemonflare.soopshield.webkit-rules";
+static NSString *const kSOOPContentRuleList =
+@"["
+"{\"trigger\":{\"url-filter\":\"^https?://(vod-player[0-9]*|main-player|img-display)\\\\.sooplive\\\\.(com|co\\\\.kr)([:/]|$)\"},\"action\":{\"type\":\"block\"}}"
+"]";
+
+static BOOL IsBlockedDNSHostCString(const char *name) {
+    if (!name || name[0] == '\0') return NO;
+    NSString *host = [NSString stringWithUTF8String:name];
+    if (!host) return NO;
+    return IsBlockedSOOPPlayerHost(host);
+}
+
+typedef int (*SOOPGetAddrInfoFunction)(const char *, const char *, const struct addrinfo *, struct addrinfo **);
+typedef struct hostent *(*SOOPGetHostByNameFunction)(const char *);
+typedef struct hostent *(*SOOPGetHostByName2Function)(const char *, int);
+
+static SOOPGetAddrInfoFunction SOOPOriginalGetAddrInfo(void) {
+    static SOOPGetAddrInfoFunction function = NULL;
+    if (!function) {
+        function = (SOOPGetAddrInfoFunction)dlsym(RTLD_NEXT, "getaddrinfo");
+    }
+    return function;
+}
+
+static SOOPGetHostByNameFunction SOOPOriginalGetHostByName(void) {
+    static SOOPGetHostByNameFunction function = NULL;
+    if (!function) {
+        function = (SOOPGetHostByNameFunction)dlsym(RTLD_NEXT, "gethostbyname");
+    }
+    return function;
+}
+
+static SOOPGetHostByName2Function SOOPOriginalGetHostByName2(void) {
+    static SOOPGetHostByName2Function function = NULL;
+    if (!function) {
+        function = (SOOPGetHostByName2Function)dlsym(RTLD_NEXT, "gethostbyname2");
+    }
+    return function;
+}
+
+static int soopshield_getaddrinfo(const char *node, const char *service, const struct addrinfo *hints, struct addrinfo **res) {
+    if (IsBlockedDNSHostCString(node)) {
+        if (res) *res = NULL;
+        NSLog(@"[SoopShield] Blocked DNS lookup: %s", node);
+        return EAI_NONAME;
+    }
+
+    SOOPGetAddrInfoFunction original = SOOPOriginalGetAddrInfo();
+    return original ? original(node, service, hints, res) : EAI_FAIL;
+}
+
+static struct hostent *soopshield_gethostbyname(const char *name) {
+    if (IsBlockedDNSHostCString(name)) {
+        h_errno = HOST_NOT_FOUND;
+        NSLog(@"[SoopShield] Blocked DNS lookup: %s", name);
+        return NULL;
+    }
+
+    SOOPGetHostByNameFunction original = SOOPOriginalGetHostByName();
+    return original ? original(name) : NULL;
+}
+
+static struct hostent *soopshield_gethostbyname2(const char *name, int af) {
+    if (IsBlockedDNSHostCString(name)) {
+        h_errno = HOST_NOT_FOUND;
+        NSLog(@"[SoopShield] Blocked DNS lookup: %s", name);
+        return NULL;
+    }
+
+    SOOPGetHostByName2Function original = SOOPOriginalGetHostByName2();
+    return original ? original(name, af) : NULL;
+}
+
+struct SOOPInterposePair {
+    const void *replacement;
+    const void *replacee;
+};
+
+#define SOOP_INTERPOSE(replacement, replacee) { (const void *)(unsigned long)&replacement, (const void *)(unsigned long)&replacee }
+
+__attribute__((used))
+static const struct SOOPInterposePair kSOOPInterposers[] __attribute__((section("__DATA,__interpose"))) = {
+    SOOP_INTERPOSE(soopshield_getaddrinfo, getaddrinfo),
+    SOOP_INTERPOSE(soopshield_gethostbyname, gethostbyname),
+    SOOP_INTERPOSE(soopshield_gethostbyname2, gethostbyname2)
+};
+
 static void InstallProtocolClassIfNeeded(NSURLSessionConfiguration *configuration) {
     if (![configuration isKindOfClass:[NSURLSessionConfiguration class]]) return;
 
@@ -180,18 +296,44 @@ static void InstallProtocolClassIfNeeded(NSURLSessionConfiguration *configuratio
     configuration.protocolClasses = updated;
 }
 
+static void InstallContentRuleListIfNeeded(WKUserContentController *controller) {
+    if (![controller isKindOfClass:[WKUserContentController class]]) return;
+
+    @synchronized (controller) {
+        NSNumber *installed = objc_getAssociatedObject(controller, kSOOPContentRuleInstalledKey);
+        if (installed.boolValue) return;
+        objc_setAssociatedObject(controller, kSOOPContentRuleInstalledKey, @YES, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+
+    WKContentRuleListStore *store = [WKContentRuleListStore defaultStore];
+    [store compileContentRuleListForIdentifier:kSOOPContentRuleIdentifier
+                        encodedContentRuleList:kSOOPContentRuleList
+                             completionHandler:^(WKContentRuleList *contentRuleList, NSError *error) {
+        if (!contentRuleList) {
+            NSLog(@"[SoopShield] Failed to install WebKit content rules: %@", error);
+            objc_setAssociatedObject(controller, kSOOPContentRuleInstalledKey, @NO, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+            return;
+        }
+
+        [controller addContentRuleList:contentRuleList];
+        NSLog(@"[SoopShield] Installed WebKit content rules");
+    }];
+}
+
 static void InstallDOMScriptIfNeeded(WKWebViewConfiguration *configuration) {
     if (![configuration isKindOfClass:[WKWebViewConfiguration class]]) return;
 
     @synchronized (configuration) {
-        NSNumber *installed = objc_getAssociatedObject(configuration, kSOOPScriptInstalledKey);
-        if (installed.boolValue) return;
-
         WKUserContentController *controller = configuration.userContentController;
         if (!controller) {
             controller = [[WKUserContentController alloc] init];
             configuration.userContentController = controller;
         }
+
+        InstallContentRuleListIfNeeded(controller);
+
+        NSNumber *installed = objc_getAssociatedObject(configuration, kSOOPScriptInstalledKey);
+        if (installed.boolValue) return;
 
         WKUserScript *script = [[WKUserScript alloc] initWithSource:kSOOPDOMScript
                                                       injectionTime:WKUserScriptInjectionTimeAtDocumentEnd
