@@ -32,6 +32,7 @@ desktop.ini
 tmp/
 temp/
 check_soop/
+crashlogs/
 test_extract/
 verify_ipa/
 dylib_output/

@@ -74,7 +74,9 @@ jobs:
           mv *.sdk "$THEOS/sdks"
 
       - name: Install dependencies
-        run: brew install ldid dpkg
+        run: |
+          brew install make ldid dpkg
+          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
 
       - name: Build SoopShield.dylib
         run: |
@@ -94,12 +96,31 @@ jobs:
 
           find dylib_output -name "*.dylib" -exec cp {} . \;
 
-          DYLIB=$(find . -maxdepth 1 -name "*.dylib" | grep -v "\.dylib\." || true)
+          DYLIB=$(find . -maxdepth 1 -name "*.dylib" ! -name "*.dylib.*" | head -n 1 || true)
           if [ -z "$DYLIB" ]; then
             find .theos/obj -name "*.dylib" -exec cp {} . \;
           fi
 
           ls -lh *.dylib
+          DYLIB=$(find . -maxdepth 1 -name "*.dylib" ! -name "*.dylib.*" | head -n 1 || true)
+          if [ -z "$DYLIB" ]; then
+            echo "::error::SoopShield.dylib not found"
+            exit 1
+          fi
+
+          DYLIB_FILE=$(file "$DYLIB")
+          echo "$DYLIB_FILE"
+          DYLIB_ARCHS=$(lipo -archs "$DYLIB" 2>/dev/null || true)
+          echo "Dylib architectures: $DYLIB_ARCHS"
+          if [[ " $DYLIB_ARCHS " != *" arm64 "* ]]; then
+            echo "::error::SoopShield.dylib must contain an arm64 slice."
+            exit 1
+          fi
+          if [[ " $DYLIB_ARCHS " == *" arm64e "* || "$DYLIB_FILE" == *"arm64e"* ]]; then
+            echo "::error::IPA injection dylib must be arm64-only. arm64e slices can be selected by dyld and crash at launch."
+            exit 1
+          fi
+          otool -hv -arch arm64 "$DYLIB" || true
 
       - name: Download and validate IPA
         run: |
@@ -129,6 +150,46 @@ jobs:
             echo "::error::SoopShield.dylib not found"
             exit 1
           fi
+
+          DYLIB_ARCHS=$(lipo -archs "$DYLIB" 2>/dev/null || true)
+          echo "Dylib architectures: $DYLIB_ARCHS"
+          DYLIB_FILE=$(file "$DYLIB")
+          echo "$DYLIB_FILE"
+          if [[ " $DYLIB_ARCHS " != *" arm64 "* ]]; then
+            echo "::error::SoopShield.dylib must contain an arm64 slice."
+            exit 1
+          fi
+          if [[ " $DYLIB_ARCHS " == *" arm64e "* || "$DYLIB_FILE" == *"arm64e"* ]]; then
+            echo "::error::SoopShield.dylib contains arm64e. IPA injection requires arm64-only to avoid dyld selecting an incompatible arm64e slice."
+            exit 1
+          fi
+
+          rm -rf ipa_arch_check
+          mkdir -p ipa_arch_check
+          unzip -q input.ipa -d ipa_arch_check
+
+          APP=$(find ipa_arch_check/Payload -maxdepth 2 -name "*.app" -type d | head -n 1)
+          if [ -z "$APP" ]; then
+            echo "::error::Could not find .app bundle in input IPA."
+            exit 1
+          fi
+
+          EXECUTABLE=$(/usr/libexec/PlistBuddy -c "Print CFBundleExecutable" "$APP/Info.plist")
+          APP_BINARY="$APP/$EXECUTABLE"
+          if [ ! -f "$APP_BINARY" ]; then
+            echo "::error::Could not find app executable: $APP_BINARY"
+            exit 1
+          fi
+
+          APP_ARCHS=$(lipo -archs "$APP_BINARY" 2>/dev/null || true)
+          echo "App executable architectures: $APP_ARCHS"
+          file "$APP_BINARY"
+          if [[ " $APP_ARCHS " != *" arm64 "* ]]; then
+            echo "::error::App executable does not contain arm64, so the arm64-only injection dylib cannot load."
+            exit 1
+          fi
+
+          rm -rf ipa_arch_check
 
           OUTPUT_NAME="${{ github.event.inputs.display_name }}.ipa"
           CYAN_ARGS=(-i input.ipa -o "$OUTPUT_NAME" -wef "$DYLIB")

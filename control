@@ -6,4 +6,4 @@ Description: SOOP iOS ad request blocker + webview ad UI hider
 Maintainer: lemonflare
 Author: lemonflare
 Section: Tweaks
-Depends: mobilesubstrate (>= 0.9.5000), firmware (>= 11.0)
+Depends: mobilesubstrate (>= 0.9.5000), firmware (>= 14.0)

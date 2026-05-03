@@ -1,7 +1,6 @@
 #import <Foundation/Foundation.h>
 #import <WebKit/WebKit.h>
 #import <objc/runtime.h>
-#import <substrate.h>
 
 typedef NS_ENUM(NSUInteger, SOOPRequestPolicy) {
     SOOPRequestPolicyAllow = 0,
@@ -208,87 +207,160 @@ static void BootstrapWebViewIfNeeded(WKWebView *webView) {
     [webView evaluateJavaScript:kSOOPDOMScript completionHandler:nil];
 }
 
-%hook NSURLSessionConfiguration
+static void SOOPSwizzleInstanceMethod(Class targetClass, SEL originalSelector, SEL swizzledSelector) {
+    if (!targetClass || !originalSelector || !swizzledSelector) return;
 
-+ (NSURLSessionConfiguration *)defaultSessionConfiguration {
-    NSURLSessionConfiguration *configuration = %orig;
+    Method originalMethod = class_getInstanceMethod(targetClass, originalSelector);
+    Method swizzledMethod = class_getInstanceMethod(targetClass, swizzledSelector);
+
+    if (!originalMethod || !swizzledMethod) {
+        NSLog(@"[SoopShield] Missing method for swizzle: %@ %@", NSStringFromClass(targetClass), NSStringFromSelector(originalSelector));
+        return;
+    }
+
+    BOOL added = class_addMethod(targetClass,
+                                 originalSelector,
+                                 method_getImplementation(swizzledMethod),
+                                 method_getTypeEncoding(swizzledMethod));
+    if (added) {
+        class_replaceMethod(targetClass,
+                            swizzledSelector,
+                            method_getImplementation(originalMethod),
+                            method_getTypeEncoding(originalMethod));
+        return;
+    }
+
+    method_exchangeImplementations(originalMethod, swizzledMethod);
+}
+
+static void SOOPSwizzleClassMethod(Class targetClass, SEL originalSelector, SEL swizzledSelector) {
+    SOOPSwizzleInstanceMethod(object_getClass(targetClass), originalSelector, swizzledSelector);
+}
+
+@implementation NSURLSessionConfiguration (SoopShield)
+
++ (NSURLSessionConfiguration *)soopshield_defaultSessionConfiguration {
+    NSURLSessionConfiguration *configuration = [self soopshield_defaultSessionConfiguration];
     InstallProtocolClassIfNeeded(configuration);
     return configuration;
 }
 
-+ (NSURLSessionConfiguration *)ephemeralSessionConfiguration {
-    NSURLSessionConfiguration *configuration = %orig;
++ (NSURLSessionConfiguration *)soopshield_ephemeralSessionConfiguration {
+    NSURLSessionConfiguration *configuration = [self soopshield_ephemeralSessionConfiguration];
     InstallProtocolClassIfNeeded(configuration);
     return configuration;
 }
 
-+ (NSURLSessionConfiguration *)backgroundSessionConfigurationWithIdentifier:(NSString *)identifier {
-    NSURLSessionConfiguration *configuration = %orig(identifier);
++ (NSURLSessionConfiguration *)soopshield_backgroundSessionConfigurationWithIdentifier:(NSString *)identifier {
+    NSURLSessionConfiguration *configuration = [self soopshield_backgroundSessionConfigurationWithIdentifier:identifier];
     InstallProtocolClassIfNeeded(configuration);
     return configuration;
 }
 
-+ (NSURLSessionConfiguration *)backgroundSessionConfiguration:(NSString *)identifier {
-    NSURLSessionConfiguration *configuration = %orig(identifier);
++ (NSURLSessionConfiguration *)soopshield_backgroundSessionConfiguration:(NSString *)identifier {
+    NSURLSessionConfiguration *configuration = [self soopshield_backgroundSessionConfiguration:identifier];
     InstallProtocolClassIfNeeded(configuration);
     return configuration;
 }
 
-%end
+@end
 
-%hook NSURLSession
+@implementation NSURLSession (SoopShield)
 
-+ (NSURLSession *)sessionWithConfiguration:(NSURLSessionConfiguration *)configuration {
++ (NSURLSession *)soopshield_sessionWithConfiguration:(NSURLSessionConfiguration *)configuration {
     InstallProtocolClassIfNeeded(configuration);
-    return %orig(configuration);
+    return [self soopshield_sessionWithConfiguration:configuration];
 }
 
-+ (NSURLSession *)sessionWithConfiguration:(NSURLSessionConfiguration *)configuration delegate:(id)delegate delegateQueue:(NSOperationQueue *)queue {
++ (NSURLSession *)soopshield_sessionWithConfiguration:(NSURLSessionConfiguration *)configuration delegate:(id)delegate delegateQueue:(NSOperationQueue *)queue {
     InstallProtocolClassIfNeeded(configuration);
-    return %orig(configuration, delegate, queue);
+    return [self soopshield_sessionWithConfiguration:configuration delegate:delegate delegateQueue:queue];
 }
 
-- (instancetype)initWithConfiguration:(NSURLSessionConfiguration *)configuration {
+- (instancetype)soopshield_initWithConfiguration:(NSURLSessionConfiguration *)configuration {
     InstallProtocolClassIfNeeded(configuration);
-    return %orig(configuration);
+    return [self soopshield_initWithConfiguration:configuration];
 }
 
-- (instancetype)initWithConfiguration:(NSURLSessionConfiguration *)configuration delegate:(id)delegate delegateQueue:(NSOperationQueue *)queue {
+- (instancetype)soopshield_initWithConfiguration:(NSURLSessionConfiguration *)configuration delegate:(id)delegate delegateQueue:(NSOperationQueue *)queue {
     InstallProtocolClassIfNeeded(configuration);
-    return %orig(configuration, delegate, queue);
+    return [self soopshield_initWithConfiguration:configuration delegate:delegate delegateQueue:queue];
 }
 
-%end
+@end
 
-%hook WKWebView
+@implementation WKWebView (SoopShield)
 
-- (instancetype)initWithFrame:(CGRect)frame configuration:(WKWebViewConfiguration *)configuration {
+- (instancetype)soopshield_initWithFrame:(CGRect)frame configuration:(WKWebViewConfiguration *)configuration {
     InstallDOMScriptIfNeeded(configuration);
-    id instance = %orig(frame, configuration);
+    id instance = [self soopshield_initWithFrame:frame configuration:configuration];
     BootstrapWebViewIfNeeded(instance);
     return instance;
 }
 
-- (instancetype)initWithCoder:(NSCoder *)coder {
-    id instance = %orig(coder);
+- (instancetype)soopshield_initWithCoder:(NSCoder *)coder {
+    id instance = [self soopshield_initWithCoder:coder];
     BootstrapWebViewIfNeeded(instance);
     return instance;
 }
 
-- (WKNavigation *)loadRequest:(NSURLRequest *)request {
+- (WKNavigation *)soopshield_loadRequest:(NSURLRequest *)request {
     BootstrapWebViewIfNeeded(self);
-    return %orig(request);
+    return [self soopshield_loadRequest:request];
 }
 
-- (WKNavigation *)loadHTMLString:(NSString *)string baseURL:(NSURL *)baseURL {
+- (WKNavigation *)soopshield_loadHTMLString:(NSString *)string baseURL:(NSURL *)baseURL {
     BootstrapWebViewIfNeeded(self);
-    return %orig(string, baseURL);
+    return [self soopshield_loadHTMLString:string baseURL:baseURL];
 }
 
-%end
+@end
 
-%ctor {
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier] ?: @"(unknown)";
-    NSLog(@"[SoopShield] Tweak loaded in bundle: %@", bundleID);
-    [NSURLProtocol registerClass:[SOOPAdBlockURLProtocol class]];
+__attribute__((constructor))
+static void SoopShieldInit(void) {
+    @autoreleasepool {
+        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier] ?: @"(unknown)";
+        NSLog(@"[SoopShield] Tweak loaded in bundle: %@", bundleID);
+
+        [NSURLProtocol registerClass:[SOOPAdBlockURLProtocol class]];
+
+        SOOPSwizzleClassMethod([NSURLSessionConfiguration class],
+                               @selector(defaultSessionConfiguration),
+                               @selector(soopshield_defaultSessionConfiguration));
+        SOOPSwizzleClassMethod([NSURLSessionConfiguration class],
+                               @selector(ephemeralSessionConfiguration),
+                               @selector(soopshield_ephemeralSessionConfiguration));
+        SOOPSwizzleClassMethod([NSURLSessionConfiguration class],
+                               @selector(backgroundSessionConfigurationWithIdentifier:),
+                               @selector(soopshield_backgroundSessionConfigurationWithIdentifier:));
+        SOOPSwizzleClassMethod([NSURLSessionConfiguration class],
+                               @selector(backgroundSessionConfiguration:),
+                               @selector(soopshield_backgroundSessionConfiguration:));
+
+        SOOPSwizzleClassMethod([NSURLSession class],
+                               @selector(sessionWithConfiguration:),
+                               @selector(soopshield_sessionWithConfiguration:));
+        SOOPSwizzleClassMethod([NSURLSession class],
+                               @selector(sessionWithConfiguration:delegate:delegateQueue:),
+                               @selector(soopshield_sessionWithConfiguration:delegate:delegateQueue:));
+        SOOPSwizzleInstanceMethod([NSURLSession class],
+                                  @selector(initWithConfiguration:),
+                                  @selector(soopshield_initWithConfiguration:));
+        SOOPSwizzleInstanceMethod([NSURLSession class],
+                                  @selector(initWithConfiguration:delegate:delegateQueue:),
+                                  @selector(soopshield_initWithConfiguration:delegate:delegateQueue:));
+
+        SOOPSwizzleInstanceMethod([WKWebView class],
+                                  @selector(initWithFrame:configuration:),
+                                  @selector(soopshield_initWithFrame:configuration:));
+        SOOPSwizzleInstanceMethod([WKWebView class],
+                                  @selector(initWithCoder:),
+                                  @selector(soopshield_initWithCoder:));
+        SOOPSwizzleInstanceMethod([WKWebView class],
+                                  @selector(loadRequest:),
+                                  @selector(soopshield_loadRequest:));
+        SOOPSwizzleInstanceMethod([WKWebView class],
+                                  @selector(loadHTMLString:baseURL:),
+                                  @selector(soopshield_loadHTMLString:baseURL:));
+    }
 }

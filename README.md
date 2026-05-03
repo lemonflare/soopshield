@@ -65,6 +65,8 @@ Expected logs include:
 - `[SoopShield] Tweak loaded in bundle: ...`
 - `[SoopShield] Blocked ad request: ...`
 
+If the injected app exits immediately with a dyld crash like `arm64e.old does not match fat header (arm64e)`, rebuild with the latest workflow. IPA injection uses an `arm64`-only dylib because App Store apps such as SOOP run as `arm64`; including an `arm64e` slice can make dyld select the wrong slice and abort at launch.
+
 ## Project Layout
 
 ```text

@@ -76,10 +76,22 @@ jobs:
             echo "dylib=$DYLIB" >> "$GITHUB_OUTPUT"
             cp "$DYLIB" ./SoopShield.dylib
             echo "dylib_simple=./SoopShield.dylib" >> "$GITHUB_OUTPUT"
-            file "$DYLIB"
-            lipo -info "$DYLIB" 2>/dev/null || echo "Single architecture"
+            DYLIB_FILE=$(file "$DYLIB")
+            echo "$DYLIB_FILE"
+            DYLIB_ARCHS=$(lipo -archs "$DYLIB" 2>/dev/null || true)
+            echo "Dylib architectures: $DYLIB_ARCHS"
+            if [[ " $DYLIB_ARCHS " != *" arm64 "* ]]; then
+              echo "::error::SoopShield.dylib must contain an arm64 slice."
+              exit 1
+            fi
+            if [[ " $DYLIB_ARCHS " == *" arm64e "* || "$DYLIB_FILE" == *"arm64e"* ]]; then
+              echo "::error::IPA injection dylib must be arm64-only. arm64e slices can be selected by dyld and crash at launch."
+              exit 1
+            fi
+            otool -hv -arch arm64 "$DYLIB" || true
           else
-            echo "No dylib found"
+            echo "::error::No dylib found"
+            exit 1
           fi
 
       - name: Upload package and dylib
