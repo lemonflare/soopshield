@@ -41,12 +41,6 @@ static BOOL HostEquals(NSString *host, NSString *target) {
     return [host isEqualToString:target];
 }
 
-static BOOL HasSuffixOrExact(NSString *value, NSString *suffix) {
-    if (value.length == 0 || suffix.length == 0) return NO;
-    if ([value isEqualToString:suffix]) return YES;
-    return [value hasSuffix:[@"." stringByAppendingString:suffix]];
-}
-
 static BOOL IsBlockedSOOPAdHost(NSString *host) {
     host = NormalizedHost(host);
     if (host.length == 0) return NO;
